@@ -1,0 +1,1159 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0d47a1">
+  <title>渡船台账移动同步助手</title>
+  <!-- PWA manifest：以内联 data URI 方式提供，确保单文件即可安装 -->
+  <link rel="manifest" id="manifest-link">
+  <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' fill='%230d47a1'/%3E%3Cpath d='M48 120 L96 150 L144 120 L144 90 L96 120 L48 90 Z' fill='%23fff'/%3E%3Cpath d='M80 75 h32 v20 h-32 z' fill='%23fff'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      --maritime-blue: #0d47a1;
+      --maritime-blue-dark: #082e6b;
+      --maritime-blue-light: #e3f2fd;
+      --white: #ffffff;
+      --gray-bg: #f5f7fa;
+      --text-main: #1a1a1a;
+      --text-muted: #666666;
+      --danger: #c62828;
+      --danger-light: #ffebee;
+      --warning: #f9a825;
+      --warning-light: #fffde7;
+      --success: #2e7d32;
+      --success-light: #e8f5e9;
+      --border: #dbe4ef;
+      --radius: 12px;
+      --shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      background: var(--gray-bg);
+      color: var(--text-main);
+      height: 100%;
+      overscroll-behavior-y: none;
+    }
+    button, input, select {
+      font-family: inherit;
+      font-size: 16px;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* 顶部标题栏 */
+    .app-header {
+      background: var(--maritime-blue);
+      color: var(--white);
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    }
+    .app-header h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    .header-btn {
+      background: rgba(255,255,255,0.18);
+      border: none;
+      color: var(--white);
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+
+    /* 页面容器 */
+    .page {
+      display: none;
+      padding: 16px 16px 90px;
+      min-height: calc(100vh - 56px);
+    }
+    .page.active { display: block; }
+
+    /* 预警仪表盘 */
+    .dashboard {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .dash-card {
+      flex: 1;
+      border-radius: var(--radius);
+      padding: 14px 6px;
+      text-align: center;
+      color: #fff;
+      box-shadow: var(--shadow);
+      cursor: pointer;
+      transition: transform .1s;
+      user-select: none;
+    }
+    .dash-card:active { transform: scale(0.98); }
+    .dash-card.red { background: var(--danger); }
+    .dash-card.yellow { background: var(--warning); color: #332800; }
+    .dash-card.green { background: var(--success); }
+    .dash-card .number {
+      font-size: 32px;
+      font-weight: 700;
+      line-height: 1;
+    }
+    .dash-card .label {
+      font-size: 13px;
+      margin-top: 6px;
+      opacity: 0.95;
+    }
+    .dash-card.active-ring {
+      outline: 3px solid rgba(0,0,0,0.25);
+      outline-offset: -3px;
+    }
+
+    /* 搜索框 */
+    .search-wrap {
+      margin-bottom: 14px;
+    }
+    .search-wrap input {
+      width: 100%;
+      padding: 14px 16px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--white);
+      outline: none;
+    }
+    .search-wrap input:focus {
+      border-color: var(--maritime-blue);
+      box-shadow: 0 0 0 3px rgba(13,71,161,0.12);
+    }
+
+    /* 船舶卡片 */
+    .ship-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .ship-card {
+      background: var(--white);
+      border-radius: var(--radius);
+      padding: 16px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      border-left: 5px solid var(--success);
+    }
+    .ship-card.expired { border-left-color: var(--danger); background: var(--danger-light); }
+    .ship-card.near { border-left-color: var(--warning); background: var(--warning-light); }
+    .ship-card.normal { border-left-color: var(--success); background: var(--success-light); }
+    .ship-card .row-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .ship-card .name {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--maritime-blue-dark);
+    }
+    .ship-card .status-tag {
+      font-size: 12px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      background: var(--maritime-blue-light);
+      color: var(--maritime-blue);
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .ship-card .info {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+    .ship-card .due {
+      font-size: 13px;
+      margin-top: 2px;
+    }
+    .ship-card .due b {
+      color: var(--text-main);
+    }
+    .ship-card .detail-btn {
+      align-self: flex-end;
+      background: var(--maritime-blue);
+      color: #fff;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 8px;
+      margin-top: 6px;
+    }
+
+    /* 空状态 */
+    .empty-state {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--text-muted);
+    }
+    .empty-state .icon { font-size: 48px; margin-bottom: 10px; }
+
+    /* 浮动添加按钮 */
+    .fab {
+      position: fixed;
+      right: 20px;
+      bottom: 66px;
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: var(--maritime-blue);
+      color: #fff;
+      border: none;
+      font-size: 30px;
+      line-height: 1;
+      box-shadow: 0 4px 12px rgba(13,71,161,0.35);
+      z-index: 110;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .fab:active { background: var(--maritime-blue-dark); }
+
+    /* 底部状态栏 */
+    .status-bar {
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      height: 52px;
+      background: var(--white);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+      z-index: 105;
+      box-shadow: 0 -2px 6px rgba(0,0,0,0.06);
+    }
+    .status-bar .sync-info {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.3;
+    }
+    .status-bar .sync-btn {
+      background: var(--maritime-blue);
+      color: #fff;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      white-space: nowrap;
+    }
+    .status-bar .sync-btn:disabled {
+      background: #90a4ae;
+    }
+    .status-bar .sync-info .time {
+      color: var(--text-main);
+      font-weight: 600;
+    }
+
+    /* 表单 */
+    .form-group {
+      margin-bottom: 16px;
+    }
+    .form-group label {
+      display: block;
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    .form-group input,
+    .form-group select {
+      width: 100%;
+      padding: 14px 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--white);
+      outline: none;
+      min-height: 48px;
+    }
+    .form-group input:focus,
+    .form-group select:focus {
+      border-color: var(--maritime-blue);
+      box-shadow: 0 0 0 3px rgba(13,71,161,0.12);
+    }
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    /* 大按钮 */
+    .btn {
+      width: 100%;
+      padding: 16px;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 17px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      cursor: pointer;
+    }
+    .btn-primary { background: var(--maritime-blue); color: #fff; }
+    .btn-primary:active { background: var(--maritime-blue-dark); }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-danger:active { background: #9e1b1b; }
+    .btn-secondary { background: #e0e0e0; color: #333; }
+    .btn-secondary:active { background: #bdbdbd; }
+    .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    /* Loading 与 Toast */
+    .loading-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(255,255,255,0.85);
+      z-index: 200;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+    }
+    .loading-overlay.active { display: flex; }
+    .spinner {
+      width: 44px; height: 44px;
+      border: 4px solid var(--maritime-blue-light);
+      border-top-color: var(--maritime-blue);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-text { color: var(--maritime-blue); font-weight: 600; }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 70px;
+      transform: translateX(-50%) translateY(20px);
+      background: rgba(0,0,0,0.82);
+      color: #fff;
+      padding: 12px 22px;
+      border-radius: 24px;
+      font-size: 14px;
+      opacity: 0;
+      pointer-events: none;
+      transition: all .25s ease;
+      z-index: 210;
+      max-width: 90vw;
+      text-align: center;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .toast.success { background: rgba(46,125,50,0.92); }
+    .toast.error { background: rgba(198,40,40,0.92); }
+
+    /* 响应式：小屏下单列 */
+    @media (max-width: 360px) {
+      .form-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 顶部标题栏 -->
+  <header class="app-header">
+    <button class="header-btn" id="back-btn" style="visibility:hidden;">返回</button>
+    <h1 id="page-title">渡船台账</h1>
+    <button class="header-btn" id="refresh-btn" title="立即同步">同步</button>
+  </header>
+
+  <!-- 列表页 -->
+  <section class="page active" id="page-list">
+    <!-- 预警仪表盘 -->
+    <div class="dashboard" id="dashboard">
+      <div class="dash-card red" data-filter="expired">
+        <div class="number" id="count-expired">0</div>
+        <div class="label">已过期</div>
+      </div>
+      <div class="dash-card yellow" data-filter="near">
+        <div class="number" id="count-near">0</div>
+        <div class="label">临期</div>
+      </div>
+      <div class="dash-card green" data-filter="normal">
+        <div class="number" id="count-normal">0</div>
+        <div class="label">正常</div>
+      </div>
+    </div>
+
+    <!-- 搜索框 -->
+    <div class="search-wrap">
+      <input type="text" id="search-input" placeholder="搜索船名、所有人或渡口" autocomplete="off">
+    </div>
+
+    <!-- 船舶列表 -->
+    <div class="ship-list" id="ship-list"></div>
+    <div class="empty-state" id="empty-state" style="display:none;">
+      <div class="icon">🚢</div>
+      <div>暂无船舶数据</div>
+    </div>
+  </section>
+
+  <!-- 详情/编辑页 -->
+  <section class="page" id="page-detail">
+    <form id="detail-form" onsubmit="return false;">
+      <div class="form-group">
+        <label>船名</label>
+        <input type="text" id="d-name" required placeholder="请输入船名">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>登记号</label>
+          <input type="text" id="d-registrationNumber" placeholder="请输入登记号">
+        </div>
+        <div class="form-group">
+          <label>营运状态</label>
+          <select id="d-operationStatus">
+            <option value="营运">营运</option>
+            <option value="停航">停航</option>
+            <option value="已注销">已注销</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>所有人</label>
+          <input type="text" id="d-owner" placeholder="请输入所有人">
+        </div>
+        <div class="form-group">
+          <label>渡口</label>
+          <input type="text" id="d-ferry" placeholder="请输入渡口">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>驾驶人姓名</label>
+          <input type="text" id="d-driverName" placeholder="请输入驾驶人姓名">
+        </div>
+        <div class="form-group">
+          <label>驾驶人电话</label>
+          <input type="tel" id="d-driverPhone" placeholder="请输入电话">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>最近检验日期</label>
+          <input type="date" id="d-lastInspectionDate">
+        </div>
+        <div class="form-group">
+          <label>船员证书类型</label>
+          <input type="text" id="d-crewCertType" placeholder="如：内河船员适任证">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>船员证书到期日</label>
+        <input type="date" id="d-crewCertExpiry">
+      </div>
+      <button type="button" class="btn btn-primary" id="detail-save-btn">保存修改</button>
+      <button type="button" class="btn btn-danger" id="detail-delete-btn">删除该船</button>
+    </form>
+  </section>
+
+  <!-- 添加新船页 -->
+  <section class="page" id="page-add">
+    <form id="add-form" onsubmit="return false;">
+      <div class="form-group">
+        <label>船名</label>
+        <input type="text" id="a-name" required placeholder="请输入船名">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>登记号</label>
+          <input type="text" id="a-registrationNumber" placeholder="请输入登记号">
+        </div>
+        <div class="form-group">
+          <label>营运状态</label>
+          <select id="a-operationStatus">
+            <option value="营运">营运</option>
+            <option value="停航">停航</option>
+            <option value="已注销">已注销</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>所有人</label>
+          <input type="text" id="a-owner" placeholder="请输入所有人">
+        </div>
+        <div class="form-group">
+          <label>渡口</label>
+          <input type="text" id="a-ferry" placeholder="请输入渡口">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>驾驶人姓名</label>
+          <input type="text" id="a-driverName" placeholder="请输入驾驶人姓名">
+        </div>
+        <div class="form-group">
+          <label>驾驶人电话</label>
+          <input type="tel" id="a-driverPhone" placeholder="请输入电话">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>最近检验日期</label>
+          <input type="date" id="a-lastInspectionDate">
+        </div>
+        <div class="form-group">
+          <label>船员证书类型</label>
+          <input type="text" id="a-crewCertType" placeholder="如：内河船员适任证">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>船员证书到期日</label>
+        <input type="date" id="a-crewCertExpiry">
+      </div>
+      <button type="button" class="btn btn-primary" id="add-save-btn">保存新船</button>
+      <button type="button" class="btn btn-secondary" id="add-cancel-btn">取消</button>
+    </form>
+  </section>
+
+  <!-- 浮动添加按钮（仅在列表页显示） -->
+  <button class="fab" id="fab-add">+</button>
+
+  <!-- 底部状态栏 -->
+  <div class="status-bar">
+    <div class="sync-info">
+      <div>上次同步：<span class="time" id="last-sync-time">--</span></div>
+      <div id="sync-status">准备就绪</div>
+    </div>
+    <button class="sync-btn" id="sync-btn">立即同步</button>
+  </div>
+
+  <!-- Loading 遮罩 -->
+  <div class="loading-overlay" id="loading">
+    <div class="spinner"></div>
+    <div class="loading-text" id="loading-text">正在同步…</div>
+  </div>
+
+  <!-- Toast 提示 -->
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // ============================================================
+    // 渡船台账移动同步助手 - 纯前端 PWA
+    // ============================================================
+
+    // 1. 核心配置：Gist ID 与访问令牌（代码顶部常量）
+    const GIST_ID = 'fcb6fc383e02a230afa07e4a2f7a330d';
+    const ACCESS_TOKEN = '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';
+    const GIST_API_BASE = 'https://api.github.com/gists';
+    const DATA_FILE = 'data.json';
+    const STORAGE_KEY = 'ferryLedgerData';
+    const LAST_SYNC_KEY = 'ferryLedgerLastSync';
+
+    // 2. 全局状态
+    let ships = [];          // 内存中的船舶数组
+    let currentFilter = 'all'; // 当前仪表盘筛选：all/expired/near/normal
+    let currentDetailId = null;
+
+    // DOM 元素引用
+    const pages = {
+      list: document.getElementById('page-list'),
+      detail: document.getElementById('page-detail'),
+      add: document.getElementById('page-add')
+    };
+    const els = {
+      pageTitle: document.getElementById('page-title'),
+      backBtn: document.getElementById('back-btn'),
+      refreshBtn: document.getElementById('refresh-btn'),
+      searchInput: document.getElementById('search-input'),
+      shipList: document.getElementById('ship-list'),
+      emptyState: document.getElementById('empty-state'),
+      fabAdd: document.getElementById('fab-add'),
+      syncBtn: document.getElementById('sync-btn'),
+      lastSyncTime: document.getElementById('last-sync-time'),
+      syncStatus: document.getElementById('sync-status'),
+      loading: document.getElementById('loading'),
+      loadingText: document.getElementById('loading-text'),
+      toast: document.getElementById('toast'),
+      dashboard: document.getElementById('dashboard'),
+      counts: {
+        expired: document.getElementById('count-expired'),
+        near: document.getElementById('count-near'),
+        normal: document.getElementById('count-normal')
+      }
+    };
+
+    // ============================================================
+    // 工具函数
+    // ============================================================
+
+    // 生成唯一 ID（时间戳 + 随机数）
+    function generateId() {
+      return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    }
+
+    // 格式化日期为 YYYY-MM-DD
+    function formatDate(date) {
+      if (!date) return '';
+      const d = new Date(date);
+      if (isNaN(d.getTime())) return '';
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+
+    // 获取今天的日期字符串（本地时区）
+    function getTodayStr() {
+      return formatDate(new Date());
+    }
+
+    // 将日期字符串增加一年，作为检验到期日
+    function addOneYear(dateStr) {
+      if (!dateStr) return null;
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return null;
+      d.setFullYear(d.getFullYear() + 1);
+      return formatDate(d);
+    }
+
+    // 计算某条船的安全状态与最临近到期日
+    // 返回：{ status: 'expired'|'near'|'normal', nearestDue: Date|null, nearestLabel: string }
+    function computeShipStatus(ship) {
+      const today = new Date(getTodayStr());
+      today.setHours(0, 0, 0, 0);
+      const candidates = [];
+
+      // 船员证书到期日
+      if (ship.crewCertExpiry) {
+        candidates.push({ date: new Date(ship.crewCertExpiry), label: '船员证书' });
+      }
+      // 检验到期日：按最近检验日期 + 1 年估算（海上渡船通常每年检验）
+      const inspectionDue = addOneYear(ship.lastInspectionDate);
+      if (inspectionDue) {
+        candidates.push({ date: new Date(inspectionDue), label: '检验' });
+      }
+
+      if (candidates.length === 0) {
+        return { status: 'normal', nearestDue: null, nearestLabel: '' };
+      }
+
+      // 找出最近的到期日
+      let nearest = candidates[0];
+      for (const c of candidates) {
+        c.date.setHours(0, 0, 0, 0);
+        if (c.date < nearest.date) nearest = c;
+      }
+
+      const diffTime = nearest.date.getTime() - today.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+      let status = 'normal';
+      if (diffDays < 0) status = 'expired';
+      else if (diffDays <= 30) status = 'near';
+
+      return {
+        status,
+        nearestDue: nearest.date,
+        nearestLabel: nearest.label,
+        diffDays
+      };
+    }
+
+    // 本地存储读写
+    function saveLocal() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(ships));
+    }
+    function loadLocal() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        ships = raw ? JSON.parse(raw) : [];
+      } catch (e) {
+        ships = [];
+      }
+    }
+    function getLastSyncText() {
+      const t = localStorage.getItem(LAST_SYNC_KEY);
+      if (!t) return '--';
+      const d = new Date(t);
+      return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    }
+    function setLastSync() {
+      const now = new Date().toISOString();
+      localStorage.setItem(LAST_SYNC_KEY, now);
+      els.lastSyncTime.textContent = getLastSyncText();
+    }
+
+    // ============================================================
+    // GitHub Gist API 交互
+    // ============================================================
+
+    // 统一的请求头
+    function gistHeaders() {
+      return {
+        'Accept': 'application/vnd.github+json',
+        'Authorization': `Bearer ${ACCESS_TOKEN}`,
+        'Content-Type': 'application/json',
+        'X-GitHub-Api-Version': '2022-11-28'
+      };
+    }
+
+    /**
+     * 从 Gist 拉取最新 data.json 内容
+     * 返回：解析后的 JSON 对象；若 Gist 中不存在该文件则返回 null
+     */
+    async function pullFromGist() {
+      const url = `${GIST_API_BASE}/${GIST_ID}`;
+      const res = await fetch(url, { headers: gistHeaders() });
+      if (!res.ok) {
+        throw new Error(`拉取失败：${res.status} ${res.statusText}`);
+      }
+      const gist = await res.json();
+      const file = gist.files && gist.files[DATA_FILE];
+      if (!file || !file.content) {
+        return null;
+      }
+      try {
+        return JSON.parse(file.content);
+      } catch (e) {
+        throw new Error('云端 data.json 格式错误');
+      }
+    }
+
+    /**
+     * 将当前 ships 数组完整推送到 Gist
+     * 采用 PATCH 更新 data.json 文件内容
+     */
+    async function pushToGist() {
+      const url = `${GIST_API_BASE}/${GIST_ID}`;
+      const payload = {
+        files: {
+          [DATA_FILE]: {
+            content: JSON.stringify(ships, null, 2)
+          }
+        }
+      };
+      const res = await fetch(url, {
+        method: 'PATCH',
+        headers: gistHeaders(),
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) {
+        throw new Error(`推送失败：${res.status} ${res.statusText}`);
+      }
+      return res.json();
+    }
+
+    /**
+     * 合并本地数据与远程数据，防止并发覆盖
+     * 策略：以船舶 ID 为键；若本地与远程同时存在同一条船，取 updatedAt 更新的版本；
+     * 若只存在于一方，则保留该方版本。
+     */
+    function mergeShips(local, remote) {
+      const map = new Map();
+      // 先放入本地数据
+      for (const s of local) {
+        if (s && s.id) map.set(s.id, s);
+      }
+      // 再与远程数据按更新时间合并
+      for (const s of remote) {
+        if (!s || !s.id) continue;
+        if (map.has(s.id)) {
+          const localItem = map.get(s.id);
+          const localTime = new Date(localItem.updatedAt || 0).getTime();
+          const remoteTime = new Date(s.updatedAt || 0).getTime();
+          if (remoteTime > localTime) {
+            map.set(s.id, s); // 远程更新，采用远程
+          }
+        } else {
+          map.set(s.id, s); // 本地没有，补充进来
+        }
+      }
+      return Array.from(map.values());
+    }
+
+    /**
+     * 执行一次完整同步：先拉取远程 -> 合并 -> 推送
+     * 参数 isBackground 为 true 时不显示 loading，用于后台静默同步
+     */
+    async function doSync({ isBackground = false, showToast = true } = {}) {
+      if (!isBackground) setLoading(true, '正在同步数据…');
+      els.syncStatus.textContent = '正在同步…';
+      try {
+        // 第一步：拉取云端最新数据
+        const remoteData = await pullFromGist();
+        if (remoteData && Array.isArray(remoteData)) {
+          ships = mergeShips(ships, remoteData);
+        }
+        // 第二步：推送合并后的完整数据到云端
+        await pushToGist();
+        // 第三步：保存到本地缓存并刷新界面
+        saveLocal();
+        setLastSync();
+        renderList();
+        if (showToast) showToastMsg('同步成功', 'success');
+        els.syncStatus.textContent = '同步成功';
+        return true;
+      } catch (err) {
+        console.error(err);
+        if (showToast) showToastMsg(err.message || '同步失败', 'error');
+        els.syncStatus.textContent = '同步失败';
+        return false;
+      } finally {
+        if (!isBackground) setLoading(false);
+      }
+    }
+
+    // 应用启动时自动拉取云端数据并覆盖/合并到本地
+    async function initialLoad() {
+      setLoading(true, '正在从云端加载…');
+      els.syncStatus.textContent = '正在初始化…';
+      try {
+        const remoteData = await pullFromGist();
+        if (remoteData && Array.isArray(remoteData)) {
+          // 启动时：以远程为准，同时保留本地独有的记录
+          ships = mergeShips(ships, remoteData);
+          saveLocal();
+        }
+        setLastSync();
+        els.syncStatus.textContent = '初始化完成';
+      } catch (err) {
+        console.error('初始拉取失败：', err);
+        els.syncStatus.textContent = '离线模式';
+        showToastMsg('无法连接云端，已使用本地数据', 'error');
+      } finally {
+        setLoading(false);
+        renderList();
+      }
+    }
+
+    // ============================================================
+    // UI 渲染与交互
+    // ============================================================
+
+    function setLoading(show, text = '加载中…') {
+      els.loadingText.textContent = text;
+      els.loading.classList.toggle('active', show);
+    }
+
+    let toastTimer = null;
+    function showToastMsg(message, type = '') {
+      const t = els.toast;
+      t.textContent = message;
+      t.className = 'toast ' + type;
+      // 强制重绘以触发 transition
+      void t.offsetWidth;
+      t.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        t.classList.remove('show');
+      }, 2500);
+    }
+
+    function switchPage(name, options = {}) {
+      // 隐藏全部页面
+      Object.values(pages).forEach(p => p.classList.remove('active'));
+      // 显示目标页面
+      pages[name].classList.add('active');
+
+      // 顶部栏与浮动按钮控制
+      if (name === 'list') {
+        els.pageTitle.textContent = '渡船台账';
+        els.backBtn.style.visibility = 'hidden';
+        els.fabAdd.style.display = 'flex';
+        renderList();
+      } else if (name === 'detail') {
+        els.pageTitle.textContent = '船舶详情';
+        els.backBtn.style.visibility = 'visible';
+        els.fabAdd.style.display = 'none';
+        loadDetailForm(options.id);
+      } else if (name === 'add') {
+        els.pageTitle.textContent = '添加新船';
+        els.backBtn.style.visibility = 'visible';
+        els.fabAdd.style.display = 'none';
+        clearAddForm();
+      }
+      window.scrollTo(0, 0);
+    }
+
+    // 渲染列表
+    function renderList() {
+      const keyword = els.searchInput.value.trim().toLowerCase();
+
+      // 统计
+      let expiredCount = 0, nearCount = 0, normalCount = 0;
+      ships.forEach(s => {
+        const st = computeShipStatus(s).status;
+        if (st === 'expired') expiredCount++;
+        else if (st === 'near') nearCount++;
+        else normalCount++;
+      });
+      els.counts.expired.textContent = expiredCount;
+      els.counts.near.textContent = nearCount;
+      els.counts.normal.textContent = normalCount;
+
+      // 筛选
+      let filtered = ships.filter(s => {
+        const st = computeShipStatus(s).status;
+        if (currentFilter !== 'all' && st !== currentFilter) return false;
+        if (!keyword) return true;
+        const hay = `${s.name || ''} ${s.owner || ''} ${s.ferry || ''}`.toLowerCase();
+        return hay.includes(keyword);
+      });
+
+      // 按最近到期日排序：过期在前、临期其次、正常最后
+      filtered.sort((a, b) => {
+        const sa = computeShipStatus(a);
+        const sb = computeShipStatus(b);
+        if (!sa.nearestDue) return 1;
+        if (!sb.nearestDue) return -1;
+        return sa.nearestDue - sb.nearestDue;
+      });
+
+      els.shipList.innerHTML = '';
+      if (filtered.length === 0) {
+        els.emptyState.style.display = 'block';
+      } else {
+        els.emptyState.style.display = 'none';
+        filtered.forEach(ship => {
+          const st = computeShipStatus(ship);
+          const card = document.createElement('div');
+          card.className = `ship-card ${st.status}`;
+
+          const statusMap = { '营运': '营运', '停航': '停航', '已注销': '已注销' };
+          const statusText = statusMap[ship.operationStatus] || ship.operationStatus || '-';
+
+          let dueHtml = '';
+          if (st.nearestDue) {
+            const dateStr = formatDate(st.nearestDue);
+            if (st.status === 'expired') {
+              dueHtml = `<div class="due"><b>⚠ 已过期 ${Math.abs(st.diffDays)} 天</b> · ${st.nearestLabel} ${dateStr}</div>`;
+            } else if (st.status === 'near') {
+              dueHtml = `<div class="due"><b>⏰ 还有 ${st.diffDays} 天到期</b> · ${st.nearestLabel} ${dateStr}</div>`;
+            } else {
+              dueHtml = `<div class="due"><b>到期：</b>${st.nearestLabel} ${dateStr}</div>`;
+            }
+          } else {
+            dueHtml = `<div class="due">暂无到期日期</div>`;
+          }
+
+          card.innerHTML = `
+            <div class="row-title">
+              <div class="name">${escapeHtml(ship.name || '未命名')}</div>
+              <div class="status-tag">${escapeHtml(statusText)}</div>
+            </div>
+            <div class="info">渡口：${escapeHtml(ship.ferry || '-')}｜所有人：${escapeHtml(ship.owner || '-')}</div>
+            ${dueHtml}
+            <button class="detail-btn" data-id="${ship.id}">查看详情</button>
+          `;
+          els.shipList.appendChild(card);
+        });
+
+        // 绑定详情按钮
+        document.querySelectorAll('.detail-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            switchPage('detail', { id: btn.dataset.id });
+          });
+        });
+      }
+    }
+
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    // 仪表盘点击筛选
+    function setDashboardFilter(filter) {
+      currentFilter = filter;
+      document.querySelectorAll('.dash-card').forEach(c => {
+        c.classList.toggle('active-ring', c.dataset.filter === filter);
+      });
+      renderList();
+    }
+
+    // 表单读取/填充
+    function readForm(prefix) {
+      return {
+        name: document.getElementById(`${prefix}-name`).value.trim(),
+        registrationNumber: document.getElementById(`${prefix}-registrationNumber`).value.trim(),
+        operationStatus: document.getElementById(`${prefix}-operationStatus`).value,
+        owner: document.getElementById(`${prefix}-owner`).value.trim(),
+        ferry: document.getElementById(`${prefix}-ferry`).value.trim(),
+        driverName: document.getElementById(`${prefix}-driverName`).value.trim(),
+        driverPhone: document.getElementById(`${prefix}-driverPhone`).value.trim(),
+        lastInspectionDate: document.getElementById(`${prefix}-lastInspectionDate`).value,
+        crewCertType: document.getElementById(`${prefix}-crewCertType`).value.trim(),
+        crewCertExpiry: document.getElementById(`${prefix}-crewCertExpiry`).value
+      };
+    }
+    function fillForm(prefix, ship) {
+      document.getElementById(`${prefix}-name`).value = ship.name || '';
+      document.getElementById(`${prefix}-registrationNumber`).value = ship.registrationNumber || '';
+      document.getElementById(`${prefix}-operationStatus`).value = ship.operationStatus || '营运';
+      document.getElementById(`${prefix}-owner`).value = ship.owner || '';
+      document.getElementById(`${prefix}-ferry`).value = ship.ferry || '';
+      document.getElementById(`${prefix}-driverName`).value = ship.driverName || '';
+      document.getElementById(`${prefix}-driverPhone`).value = ship.driverPhone || '';
+      document.getElementById(`${prefix}-lastInspectionDate`).value = ship.lastInspectionDate || '';
+      document.getElementById(`${prefix}-crewCertType`).value = ship.crewCertType || '';
+      document.getElementById(`${prefix}-crewCertExpiry`).value = ship.crewCertExpiry || '';
+    }
+    function clearAddForm() {
+      document.getElementById('add-form').reset();
+    }
+    function loadDetailForm(id) {
+      currentDetailId = id;
+      const ship = ships.find(s => s.id === id);
+      if (!ship) {
+        showToastMsg('未找到该船舶', 'error');
+        switchPage('list');
+        return;
+      }
+      fillForm('d', ship);
+    }
+
+    // 保存详情
+    async function saveDetail() {
+      const name = document.getElementById('d-name').value.trim();
+      if (!name) {
+        showToastMsg('请填写船名', 'error');
+        return;
+      }
+      const ship = ships.find(s => s.id === currentDetailId);
+      if (!ship) return;
+      Object.assign(ship, readForm('d'));
+      ship.updatedAt = new Date().toISOString();
+      saveLocal();
+      const ok = await doSync({ isBackground: false });
+      if (ok) {
+        showToastMsg('保存成功', 'success');
+        switchPage('list');
+      }
+    }
+
+    // 删除详情
+    async function deleteDetail() {
+      if (!confirm('确定要删除这条船舶记录吗？删除后将同步到云端。')) return;
+      ships = ships.filter(s => s.id !== currentDetailId);
+      saveLocal();
+      const ok = await doSync({ isBackground: false });
+      if (ok) {
+        showToastMsg('已删除', 'success');
+        switchPage('list');
+      }
+    }
+
+    // 添加新船
+    async function saveNewShip() {
+      const name = document.getElementById('a-name').value.trim();
+      if (!name) {
+        showToastMsg('请填写船名', 'error');
+        return;
+      }
+      const newShip = {
+        id: generateId(),
+        ...readForm('a'),
+        updatedAt: new Date().toISOString()
+      };
+      ships.push(newShip);
+      saveLocal();
+      const ok = await doSync({ isBackground: false });
+      if (ok) {
+        showToastMsg('添加成功', 'success');
+        switchPage('list');
+      }
+    }
+
+    // ============================================================
+    // 事件绑定
+    // ============================================================
+
+    els.backBtn.addEventListener('click', () => switchPage('list'));
+    els.refreshBtn.addEventListener('click', () => doSync());
+    els.syncBtn.addEventListener('click', () => doSync());
+    els.searchInput.addEventListener('input', renderList);
+    els.fabAdd.addEventListener('click', () => switchPage('add'));
+
+    document.getElementById('detail-save-btn').addEventListener('click', saveDetail);
+    document.getElementById('detail-delete-btn').addEventListener('click', deleteDetail);
+    document.getElementById('add-save-btn').addEventListener('click', saveNewShip);
+    document.getElementById('add-cancel-btn').addEventListener('click', () => switchPage('list'));
+
+    // 仪表盘色块点击
+    document.querySelectorAll('.dash-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const filter = card.dataset.filter;
+        if (currentFilter === filter) {
+          setDashboardFilter('all'); // 再次点击取消筛选
+        } else {
+          setDashboardFilter(filter);
+        }
+      });
+    });
+
+    // ============================================================
+    // PWA：注册 Service Worker（单文件方案）
+    // ============================================================
+
+    // 内联 manifest
+    const manifest = {
+      name: '渡船台账移动同步助手',
+      short_name: '渡船台账',
+      description: '海事处一线执法人员移动同步助手',
+      start_url: '.',
+      display: 'standalone',
+      background_color: '#f5f7fa',
+      theme_color: '#0d47a1',
+      orientation: 'portrait-primary',
+      icons: [
+        {
+          src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' fill='%230d47a1'/%3E%3Cpath d='M48 120 L96 150 L144 120 L144 90 L96 120 L48 90 Z' fill='%23fff'/%3E%3Cpath d='M80 75 h32 v20 h-32 z' fill='%23fff'/%3E%3C/svg%3E",
+          sizes: '192x192',
+          type: 'image/svg+xml'
+        }
+      ]
+    };
+    document.getElementById('manifest-link').href =
+      'data:application/manifest+json;charset=utf-8,' + encodeURIComponent(JSON.stringify(manifest));
+
+    // Service Worker 代码：以 Blob URL 方式注册，保证单文件可离线启动
+    const swCode = `
+      const CACHE_NAME = 'ferry-ledger-v1';
+      const FALLBACK_URL = self.location.href;
+      self.addEventListener('install', event => {
+        event.waitUntil(
+          caches.open(CACHE_NAME).then(cache => cache.add(FALLBACK_URL))
+        );
+        self.skipWaiting();
+      });
+      self.addEventListener('activate', event => {
+        event.waitUntil(self.clients.claim());
+      });
+      self.addEventListener('fetch', event => {
+        event.respondWith(
+          caches.match(event.request).then(response => {
+            return response || fetch(event.request).catch(() => caches.match(FALLBACK_URL));
+          })
+        );
+      });
+    `;
+    if ('serviceWorker' in navigator) {
+      const swBlob = new Blob([swCode], { type: 'application/javascript' });
+      const swUrl = URL.createObjectURL(swBlob);
+      navigator.serviceWorker.register(swUrl)
+        .then(reg => console.log('Service Worker 注册成功', reg.scope))
+        .catch(err => console.error('Service Worker 注册失败', err));
+    }
+
+    // ============================================================
+    // 启动应用
+    // ============================================================
+    loadLocal();
+    els.lastSyncTime.textContent = getLastSyncText();
+    initialLoad();
+  </script>
+</body>
+</html>
