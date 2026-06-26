@@ -602,11 +602,13 @@
       <h2>配置 GitHub Token</h2>
       <div class="tips">
         <p>本应用使用 GitHub Gist 同步数据。Token 仅保存在本机，不会上传到服务器。</p>
-        <p>请前往 GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)，新建一个勾选 <code>gist</code> 权限的 Token 并填入下方。</p>
+        <p>请前往 GitHub → Settings → Developer settings → Personal access tokens → <b>Tokens (classic)</b>，新建一个勾选 <code>gist</code> 权限的 Token 并填入下方。</p>
+        <p><b style="color:var(--danger)">不要使用 Fine-grained personal access token，它不支持 Gist API。</b></p>
         <p><b>注意：不要把 Token 直接写入公开仓库的代码中，否则会被 GitHub 自动吊销。</b></p>
       </div>
       <div class="message" id="setup-message"></div>
       <input type="text" id="token-input" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+      <button type="button" class="btn btn-primary" id="setup-test-btn">测试 Token</button>
       <button type="button" class="btn btn-primary" id="setup-save-btn">保存并开始同步</button>
       <button type="button" class="btn btn-secondary" id="setup-clear-btn">清除已保存 Token</button>
     </div>
@@ -773,7 +775,7 @@
     function gistHeaders() {
       return {
         'Accept': 'application/vnd.github+json',
-        'Authorization': `Bearer ${getAccessToken()}`,
+        'Authorization': `token ${getAccessToken()}`,
         'Content-Type': 'application/json',
         'X-GitHub-Api-Version': '2022-11-28'
       };
@@ -787,6 +789,9 @@
       const url = `${GIST_API_BASE}/${GIST_ID}`;
       const res = await fetch(url, { headers: gistHeaders() });
       if (!res.ok) {
+        if (res.status === 401) {
+          throw new Error('Token 无效（401 Bad credentials）：请确认使用的是 classic token 且已勾选 gist 权限；如曾把 Token 写入公开页面或仓库，GitHub 可能已自动吊销，需重新生成');
+        }
         throw new Error(`拉取失败：${res.status} ${res.statusText}`);
       }
       const gist = await res.json();
@@ -820,6 +825,9 @@
         body: JSON.stringify(payload)
       });
       if (!res.ok) {
+        if (res.status === 401) {
+          throw new Error('Token 无效（401 Bad credentials）：请确认使用的是 classic token 且已勾选 gist 权限；如曾把 Token 写入公开页面或仓库，GitHub 可能已自动吊销，需重新生成');
+        }
         throw new Error(`推送失败：${res.status} ${res.statusText}`);
       }
       return res.json();
@@ -858,6 +866,13 @@
      * 参数 isBackground 为 true 时不显示 loading，用于后台静默同步
      */
     async function doSync({ isBackground = false, showToast = true } = {}) {
+      // 没有 Token 时不应发起同步，直接提示配置
+      if (!getAccessToken()) {
+        if (!isBackground) setLoading(false);
+        els.syncStatus.textContent = '未配置 Token';
+        showSetup('请先配置 GitHub Token 后再同步');
+        return false;
+      }
       if (!isBackground) setLoading(true, '正在同步数据…');
       els.syncStatus.textContent = '正在同步…';
       try {
@@ -879,6 +894,10 @@
         console.error(err);
         if (showToast) showToastMsg(err.message || '同步失败', 'error');
         els.syncStatus.textContent = '同步失败';
+        // 如果是 Token 问题，自动弹出设置窗口方便用户重新输入
+        if (err.message && err.message.includes('Token 无效')) {
+          showSetup(err.message);
+        }
         return false;
       } finally {
         if (!isBackground) setLoading(false);
@@ -911,7 +930,10 @@
       } catch (err) {
         console.error('初始拉取失败：', err);
         els.syncStatus.textContent = '离线模式';
-        showToastMsg('无法连接云端，已使用本地数据', 'error');
+        showToastMsg(err.message || '无法连接云端，已使用本地数据', 'error');
+        if (err.message && err.message.includes('Token 无效')) {
+          showSetup(err.message);
+        }
       } finally {
         setLoading(false);
         renderList();
@@ -966,6 +988,15 @@
         showToastMsg('请输入 Token', 'error');
         return;
       }
+      // 简单校验：Gist API 只支持 classic personal access token，不支持 fine-grained token
+      if (token.startsWith('github_pat_')) {
+        showToastMsg('这是 fine-grained token，不支持 Gist，请使用 classic token', 'error');
+        return;
+      }
+      if (!token.startsWith('ghp_')) {
+        showToastMsg('Token 格式异常，classic token 应以 ghp_ 开头', 'error');
+        return;
+      }
       localStorage.setItem(TOKEN_KEY, token);
       hideSetup();
       showToastMsg('Token 已保存，开始同步', 'success');
@@ -976,6 +1007,41 @@
       localStorage.removeItem(TOKEN_KEY);
       document.getElementById('token-input').value = '';
       showToastMsg('已清除 Token', 'success');
+    }
+
+    // 用当前输入框里的 Token 测试一次 GET 请求，不保存
+    async function testToken() {
+      const input = document.getElementById('token-input');
+      const token = input.value.trim();
+      if (!token) {
+        showToastMsg('请输入 Token', 'error');
+        return;
+      }
+      if (token.startsWith('github_pat_')) {
+        showToastMsg('这是 fine-grained token，不支持 Gist，请使用 classic token', 'error');
+        return;
+      }
+      setLoading(true, '正在测试 Token…');
+      try {
+        const res = await fetch(`${GIST_API_BASE}/${GIST_ID}`, {
+          headers: {
+            'Accept': 'application/vnd.github+json',
+            'Authorization': `token ${token}`,
+            'X-GitHub-Api-Version': '2022-11-28'
+          }
+        });
+        if (res.status === 200) {
+          showToastMsg('Token 有效，可以连接 Gist', 'success');
+        } else if (res.status === 401) {
+          showToastMsg('Token 无效（401）：请检查是否为 classic token 且已勾选 gist 权限，或尝试重新生成 Token', 'error');
+        } else {
+          showToastMsg(`测试失败：${res.status} ${res.statusText}`, 'error');
+        }
+      } catch (err) {
+        showToastMsg('网络错误，无法连接 GitHub', 'error');
+      } finally {
+        setLoading(false);
+      }
     }
 
     function switchPage(name, options = {}) {
@@ -1206,6 +1272,7 @@
     els.syncBtn.addEventListener('click', () => doSync());
 
     // Token 设置窗口事件
+    document.getElementById('setup-test-btn').addEventListener('click', testToken);
     document.getElementById('setup-save-btn').addEventListener('click', saveToken);
     document.getElementById('setup-clear-btn').addEventListener('click', clearToken);
     els.searchInput.addEventListener('input', renderList);
@@ -1255,7 +1322,7 @@
 
     // Service Worker 代码：以 Blob URL 方式注册，保证单文件可离线启动
     const swCode = `
-      const CACHE_NAME = 'ferry-ledger-v1';
+      const CACHE_NAME = 'ferry-ledger-v2';
       const FALLBACK_URL = self.location.href;
       self.addEventListener('install', event => {
         event.waitUntil(
@@ -1275,11 +1342,18 @@
       });
     `;
     if ('serviceWorker' in navigator) {
-      const swBlob = new Blob([swCode], { type: 'application/javascript' });
-      const swUrl = URL.createObjectURL(swBlob);
-      navigator.serviceWorker.register(swUrl)
-        .then(reg => console.log('Service Worker 注册成功', reg.scope))
-        .catch(err => console.error('Service Worker 注册失败', err));
+      try {
+        const swBlob = new Blob([swCode], { type: 'application/javascript' });
+        const swUrl = URL.createObjectURL(swBlob);
+        navigator.serviceWorker.register(swUrl)
+          .then(reg => console.log('Service Worker 注册成功', reg.scope))
+          .catch(err => {
+            // 某些浏览器或 file:// 协议下不支持通过 blob URL 注册 Service Worker，属于预期行为
+            console.warn('Service Worker 注册失败（离线缓存不可用，不影响主功能）:', err.message);
+          });
+      } catch (err) {
+        console.warn('Service Worker 初始化失败（离线缓存不可用，不影响主功能）:', err.message);
+      }
     }
 
     // ============================================================
