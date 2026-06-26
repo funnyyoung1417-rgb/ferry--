@@ -1235,10 +1235,12 @@
       if (!confirm('确定要删除这条船舶记录吗？删除后将同步到云端。')) return;
       ships = ships.filter(s => s.id !== currentDetailId);
       saveLocal();
-      const ok = await doSync({ isBackground: false });
-      if (ok) {
-        showToastMsg('已删除', 'success');
-        switchPage('list');
+      showToastMsg('已删除（本地）', 'success');
+      switchPage('list');
+      // 后台尝试同步；失败不影响本地删除状态，仅提示用户
+      const ok = await doSync({ isBackground: true });
+      if (!ok) {
+        showToastMsg('云端同步失败，删除仅保存在本地', 'error');
       }
     }
 
