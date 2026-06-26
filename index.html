@@ -1074,9 +1074,10 @@
     function renderList() {
       const keyword = els.searchInput.value.trim().toLowerCase();
 
-      // 统计
+      // 统计（已删除的不计入）
       let expiredCount = 0, nearCount = 0, normalCount = 0;
       ships.forEach(s => {
+        if (s.deleted) return;
         const st = computeShipStatus(s).status;
         if (st === 'expired') expiredCount++;
         else if (st === 'near') nearCount++;
@@ -1086,8 +1087,9 @@
       els.counts.near.textContent = nearCount;
       els.counts.normal.textContent = normalCount;
 
-      // 筛选
+      // 筛选（不显示已删除）
       let filtered = ships.filter(s => {
+        if (s.deleted) return false;
         const st = computeShipStatus(s).status;
         if (currentFilter !== 'all' && st !== currentFilter) return false;
         if (!keyword) return true;
@@ -1203,7 +1205,7 @@
     function loadDetailForm(id) {
       currentDetailId = id;
       const ship = ships.find(s => s.id === id);
-      if (!ship) {
+      if (!ship || ship.deleted) {
         showToastMsg('未找到该船舶', 'error');
         switchPage('list');
         return;
@@ -1221,6 +1223,7 @@
       const ship = ships.find(s => s.id === currentDetailId);
       if (!ship) return;
       Object.assign(ship, readForm('d'));
+      ship.deleted = false; // 编辑时恢复为未删除
       ship.updatedAt = new Date().toISOString();
       saveLocal();
       const ok = await doSync({ isBackground: false });
@@ -1230,10 +1233,13 @@
       }
     }
 
-    // 删除详情
+    // 删除详情：使用软删除（deleted 标记 + updatedAt），确保合并策略能同步到云端
     async function deleteDetail() {
       if (!confirm('确定要删除这条船舶记录吗？删除后将同步到云端。')) return;
-      ships = ships.filter(s => s.id !== currentDetailId);
+      const ship = ships.find(s => s.id === currentDetailId);
+      if (!ship) return;
+      ship.deleted = true;
+      ship.updatedAt = new Date().toISOString();
       saveLocal();
       showToastMsg('已删除（本地）', 'success');
       switchPage('list');
@@ -1254,6 +1260,7 @@
       const newShip = {
         id: generateId(),
         ...readForm('a'),
+        deleted: false,
         updatedAt: new Date().toISOString()
       };
       ships.push(newShip);
